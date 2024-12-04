@@ -2,6 +2,10 @@ import numpy as np
 import pandas as pd
 from collections.abc import Iterable
 
+def truncate(value, max_length=200):
+    """Truncate string representation of a value if it exceeds max_length."""
+    value_str = str(value)
+    return value_str if len(value_str) <= max_length else value_str[:max_length] + "..."
 
 def display_items(items, max_head=5, max_tail=5):
     """Display head and tail of items, skipping the middle if necessary."""
