@@ -6,6 +6,10 @@
 pip install git+https://github.com/Pogjunan/dlpack_v1.git
 ```
 
+업그레이드 방법 (upgrade)
+```
+pip install --upgrade --force-reinstall git+https://github.com/Pogjunan/dlpack_v1.git
+```
 
 설명
 
