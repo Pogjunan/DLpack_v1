@@ -3,7 +3,7 @@
 설치하는 방법
 
 ```
-pip install git+https://github.com/guebin/mp2024pkg.git
+pip install git+https://github.com/Pogjunan/dlpack_v1.git
 ```
 
 
