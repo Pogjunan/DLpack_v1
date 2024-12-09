@@ -384,13 +384,143 @@ def image_animation_7day1(pred_dir, target_dir, output_gif, font_path=None):
         # 공백 프레임(10초)을 주기 위해, 프레임 하나를 1초 단위로 10번 넣는 방법 사용 (느려도 무방)
         pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
         pause_array = np.array(pause_frame)
-        repeat_count = 25  # 5초 / 0.2초 = 25프레임
+        repeat_count = 200  
         for _ in range(repeat_count):
             frames.append(pause_array)
-            durations.append(0.2)  # 각 프레임이 0.2초로 표시
+            durations.append(1.0)  
 
     imageio.mimsave(output_gif, frames, duration=durations, loop=0)
     print(f"Animation saved as {output_gif}")
 
 
+
+from pathlib import Path
+import imageio
+from PIL import Image, ImageDraw, ImageFont
+from datetime import datetime, timedelta
+import re
+import numpy as np
+
+def parse_filename(filename):
+    pattern = r'(\d{4}-\d{2}-\d{2})_(\d{4})'
+    match = re.search(pattern, filename)
+    if match:
+        date_str = match.group(1)
+        time_str = match.group(2)
+        hour = int(time_str[:2])
+        minute = int(time_str[2:])
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        dt = dt.replace(hour=hour, minute=minute)
+        return dt
+    else:
+        return None
+
+def image_animation_7day2(pred_dir, target_dir, output_gif, font_path=None):
+    pred_dir = Path(pred_dir)
+    target_dir = Path(target_dir)
+    output_gif = Path(output_gif)  # Path 객체로 변환
+
+    pred_files = sorted(pred_dir.glob("*.png"), key=lambda x: x.name)
+    target_files = sorted(target_dir.glob("*.png"), key=lambda x: x.name)
+
+    pred_dict = {}
+    for pf in pred_files:
+        dt = parse_filename(pf.name)
+        if dt:
+            pred_dict[dt] = pf
+
+    pairs = []
+    for tf in target_files:
+        dt = parse_filename(tf.name)
+        if dt and dt in pred_dict:
+            pairs.append((dt, pred_dict[dt], tf))
+
+    pairs.sort(key=lambda x: x[0])
+    if not pairs:
+        print("No matched image pairs found.")
+        return
+
+    # 7일 단위로 끊기
+    chunks = []
+    chunk = []
+    start_time = pairs[0][0]
+    end_time = start_time + timedelta(days=7)
+
+    for p in pairs:
+        dt = p[0]
+        if dt < end_time:
+            chunk.append(p)
+        else:
+            if chunk:
+                chunks.append(chunk)
+            chunk = [p]
+            start_time = dt
+            end_time = start_time + timedelta(days=7)
+    if chunk:
+        chunks.append(chunk)
+
+    # 폰트 설정
+    if font_path and Path(font_path).exists():
+        font = ImageFont.truetype(str(font_path), 20)
+    else:
+        font = ImageFont.load_default()
+
+    # 각 chunk마다 별도의 GIF 파일 생성
+    for i, c in enumerate(chunks, start=1):
+        n = len(c)
+        if n == 0:
+            continue
+        frame_duration = 20.0 / n
+
+        start_dt = c[0][0]
+        end_dt = c[-1][0]
+        date_range_text = f"{start_dt.strftime('%Y-%m-%d')} ~ {end_dt.strftime('%Y-%m-%d')}"
+
+        out_w, out_h = None, None
+
+        # 이 chunk에 대한 frames, durations 초기화
+        frames = []
+        durations = []
+
+        for (dt, pred_file, target_file) in c:
+            pred_img = Image.open(pred_file).convert("RGB")
+            target_img = Image.open(target_file).convert("RGB")
+
+            w1, h1 = pred_img.size
+            w2, h2 = target_img.size
+
+            if out_w is None:
+                out_w = w1 + w2
+                out_h = max(h1, h2) + 50
+
+            combined = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+            combined.paste(pred_img, (0, 0))
+            combined.paste(target_img, (w1, 0))
+
+            draw = ImageDraw.Draw(combined)
+            time_text = dt.strftime("%Y-%m-%d %H:%M")
+            bbox = font.getbbox(time_text)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text(((out_w - tw) / 2, out_h - th - 5), time_text, fill="black", font=font)
+
+            bbox = font.getbbox(date_range_text)
+            trw, trh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text(((out_w - trw) / 2, out_h - th - trh - 30), date_range_text, fill="black", font=font)
+
+            frame_array = np.array(combined)
+            frames.append(frame_array)
+            durations.append(frame_duration)
+
+
+        pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+        pause_array = np.array(pause_frame)
+        repeat_count = 200  # 5초 / 0.2초 = 25
+        for _ in range(repeat_count):
+            frames.append(pause_array)
+            durations.append(1.0)
+
+        # 현재 chunk를 별도 gif로 저장
+        chunk_output_gif = output_gif.parent / f"{output_gif.stem}_{i}{output_gif.suffix}"
+        imageio.mimsave(chunk_output_gif, frames, duration=durations, loop=0)
+        print(f"Chunk {i} animation saved as {chunk_output_gif}")
 
