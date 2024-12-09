@@ -383,10 +383,11 @@ def image_animation_7day1(pred_dir, target_dir, output_gif, font_path=None):
         #10초 공백 프레임 삽입
         # 공백 프레임(10초)을 주기 위해, 프레임 하나를 1초 단위로 10번 넣는 방법 사용 (느려도 무방)
         pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
-        pause_array = np.array(pause_frame) 
-        for _ in range(10):  # 1초씩 10번 -> 총 10초
+        pause_array = np.array(pause_frame)
+        repeat_count = 25  # 5초 / 0.2초 = 25프레임
+        for _ in range(repeat_count):
             frames.append(pause_array)
-            durations.append(1.0)  # 1초짜리 프레임을 10개 넣어 총 10초 대기 
+            durations.append(0.2)  # 각 프레임이 0.2초로 표시
 
     imageio.mimsave(output_gif, frames, duration=durations, loop=0)
     print(f"Animation saved as {output_gif}")
