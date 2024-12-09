@@ -274,8 +274,10 @@ def image_animation_7day(pred_dir, target_dir, output_gif, font_path=None):
                 # frame은 PIL Image 객체
                 frame_array = np.array(frame)  
 # PIL Image -> numpy array 변환 ( 파일 경로나 파일과 유사한 객체를 기대때문에 변경필요)
-                writer.append_data(frame_array, duration=frame_duration)
-
+                #writer.append_data(frame_array, duration=frame_duration) <--문제코드
+                #메타데이터(meta) 딕셔너리를 통해 전달가능 
+                writer.append_data(frame_array, meta={'duration': frame_duration})
+                #이후 버전 바뀌어서 문제 발생시 imageio.mimsave() -> mageio.mimsave('animation.gif', frames, duration=0.05) 사용
 
             # 한 덩어리 끝나면 10초 공백 프레임 삽입
             pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
