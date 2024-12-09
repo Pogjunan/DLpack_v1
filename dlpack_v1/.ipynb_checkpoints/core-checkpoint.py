@@ -262,11 +262,12 @@ def image_animation_7day(pred_dir, target_dir, output_gif, font_path=None):
                 time_text = dt.strftime("%Y-%m-%d %H:%M")
                 # text 위치 (가운데 정렬을 위해 텍스트 길이를 고려)
                 # 날짜/시간 텍스트 크기 계산
-                tw, th = font.getsize(time_text)
+                bbox = font.getbbox(time_text)
+                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
                 draw.text(((out_w - tw) / 2, out_h - th - 5), time_text, fill="black", font=font)
                 
-                # 7일 기간 텍스트 크기 계산
-                trw, trh = font.getsize(date_range_text)
+                bbox = font.getbbox(date_range_text)
+                trw, trh = bbox[2] - bbox[0], bbox[3] - bbox[1]
                 draw.text(((out_w - trw) / 2, out_h - th - trh - 30), date_range_text, fill="black", font=font)
 
                 frame = combined.copy()
