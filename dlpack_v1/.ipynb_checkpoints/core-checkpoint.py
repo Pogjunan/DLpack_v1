@@ -271,7 +271,11 @@ def image_animation_7day(pred_dir, target_dir, output_gif, font_path=None):
                 draw.text(((out_w - trw) / 2, out_h - th - trh - 30), date_range_text, fill="black", font=font)
 
                 frame = combined.copy()
-                writer.append_data(imageio.v3.imread(frame), duration=frame_duration)
+                # frame은 PIL Image 객체
+                frame_array = np.array(frame)  
+# PIL Image -> numpy array 변환 ( 파일 경로나 파일과 유사한 객체를 기대때문에 변경필요)
+                writer.append_data(frame_array, duration=frame_duration)
+
 
             # 한 덩어리 끝나면 10초 공백 프레임 삽입
             pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
