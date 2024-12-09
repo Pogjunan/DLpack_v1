@@ -280,13 +280,116 @@ def image_animation_7day(pred_dir, target_dir, output_gif, font_path=None):
                 #이후 버전 바뀌어서 문제 발생시 imageio.mimsave() -> mageio.mimsave('animation.gif', frames, duration=0.05) 사용
 
                 
-                # 한 덩어리 끝나면 10초 공백 프레임 삽입
+                
                 pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
                 pause_array = np.array(pause_frame)
-                writer.append_data(pause_array)  # 그냥 바로 append_data (duration무시가능?)
+                writer.append_data(pause_array)  
 
     print(f"Animation saved as {output_gif}")
 
+
+
+
+def image_animation_7day1(pred_dir, target_dir, output_gif, font_path=None):
+    pred_dir = Path(pred_dir)
+    target_dir = Path(target_dir)
+
+    pred_files = sorted(pred_dir.glob("*.png"), key=lambda x: x.name)
+    target_files = sorted(target_dir.glob("*.png"), key=lambda x: x.name)
+
+    pred_dict = {}
+    for pf in pred_files:
+        dt = parse_filename(pf.name)
+        if dt:
+            pred_dict[dt] = pf
+
+    pairs = []
+    for tf in target_files:
+        dt = parse_filename(tf.name)
+        if dt and dt in pred_dict:
+            pairs.append((dt, pred_dict[dt], tf))
+
+    pairs.sort(key=lambda x: x[0])
+    if not pairs:
+        print("No matched image pairs found.")
+        return
+
+    chunks = []
+    chunk = []
+    start_time = pairs[0][0]
+    end_time = start_time + timedelta(days=7)
+
+    for p in pairs:
+        dt = p[0]
+        if dt < end_time:
+            chunk.append(p)
+        else:
+            if chunk:
+                chunks.append(chunk)
+            chunk = [p]
+            start_time = dt
+            end_time = start_time + timedelta(days=7)
+    if chunk:
+        chunks.append(chunk)
+
+    if font_path and Path(font_path).exists():
+        font = ImageFont.truetype(str(font_path), 20)
+    else:
+        font = ImageFont.load_default()
+
+    frames = []
+    durations = []
+
+    for c in chunks:
+        n = len(c)
+        if n == 0:
+            continue
+        frame_duration = 20.0 / n
+
+        start_dt = c[0][0]
+        end_dt = c[-1][0]
+        date_range_text = f"{start_dt.strftime('%Y-%m-%d')} ~ {end_dt.strftime('%Y-%m-%d')}"
+
+        out_w, out_h = None, None
+
+        for (dt, pred_file, target_file) in c:
+            pred_img = Image.open(pred_file).convert("RGB")
+            target_img = Image.open(target_file).convert("RGB")
+
+            w1, h1 = pred_img.size
+            w2, h2 = target_img.size
+
+            if out_w is None:
+                out_w = w1 + w2
+                out_h = max(h1, h2) + 50
+
+            combined = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+            combined.paste(pred_img, (0, 0))
+            combined.paste(target_img, (w1, 0))
+
+            draw = ImageDraw.Draw(combined)
+            time_text = dt.strftime("%Y-%m-%d %H:%M")
+            bbox = font.getbbox(time_text)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text(((out_w - tw) / 2, out_h - th - 5), time_text, fill="black", font=font)
+
+            bbox = font.getbbox(date_range_text)
+            trw, trh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text(((out_w - trw) / 2, out_h - th - trh - 30), date_range_text, fill="black", font=font)
+
+            frame_array = np.array(combined)
+            frames.append(frame_array)
+            durations.append(frame_duration)
+        #10초 공백 프레임 삽입
+        # 공백 프레임(10초)을 주기 위해, 프레임 하나를 1초 단위로 10번 넣는 방법 사용 (느려도 무방)
+        pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+        pause_array = np.array(pause_frame) 
+        for _ in range(10):  # 1초씩 10번 -> 총 10초
+            frames.append(pause_array)
+            durations.append(1.0)  # 1초짜리 프레임을 10개 넣어 총 10초 대기 
+
+    imageio.mimsave(output_gif, frames, duration=durations, loop=0)
+    print(f"Animation saved as {output_gif}")
 
 
 
