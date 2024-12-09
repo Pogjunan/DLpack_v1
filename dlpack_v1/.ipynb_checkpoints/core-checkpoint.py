@@ -230,7 +230,7 @@ def image_animation_7day(pred_dir, target_dir, output_gif, font_path=None):
     else:
         font = ImageFont.load_default()
 
-    # GIF 생성
+
     with imageio.get_writer(output_gif, mode="I") as writer:
         for c in chunks:
             # c는 7일짜리 덩어리
@@ -279,9 +279,11 @@ def image_animation_7day(pred_dir, target_dir, output_gif, font_path=None):
                 writer.append_data(frame_array, meta={'duration': frame_duration})
                 #이후 버전 바뀌어서 문제 발생시 imageio.mimsave() -> mageio.mimsave('animation.gif', frames, duration=0.05) 사용
 
-            # 한 덩어리 끝나면 10초 공백 프레임 삽입
-            pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
-            writer.append_data(imageio.v3.imread(pause_frame), duration=10.0)
+                
+                # 한 덩어리 끝나면 10초 공백 프레임 삽입
+                pause_frame = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+                pause_array = np.array(pause_frame)
+                writer.append_data(pause_array)  # 그냥 바로 append_data (duration무시가능?)
 
     print(f"Animation saved as {output_gif}")
 
