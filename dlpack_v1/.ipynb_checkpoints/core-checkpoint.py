@@ -1,6 +1,15 @@
+## import ##
+
+import os
+import imageio
 import numpy as np
 import pandas as pd
+from pathlib import Path
+import matplotlib.pyplot as plt
 from collections.abc import Iterable
+
+
+##function ##
 
 def truncate(value, max_length=200):
     """Truncate string representation of a value if it exceeds max_length."""
@@ -106,4 +115,33 @@ class SAM(torch.optim.Optimizer):
             p=2
         )
         return norm
+
+def image_animation(image_dir, output_gif, duration=0.7):
+    """
+    Create an animated GIF from a series of images in a directory.
+
+    Args:
+        image_dir (str or Path): Directory containing the image files.
+        output_gif (str): Filename for the output GIF.
+        duration (float): Duration for each frame in the GIF (in seconds).
+    """
+    # image_dir = "image_dir"  # Directory containing PNG images
+    # output_gif = "2nd_trial.gif"  # Output GIF filename
+    # image_animation(image_dir, output_gif, duration=0.7)
+    
+    # Convert image_dir to Path object if it's a string
+    image_dir = Path(image_dir)
+    image_files = sorted(image_dir.glob("*.png"), key=lambda x: x.name)
+    if not image_files:
+        print("No image files found in the specified directory.")
+        return
+
+    with imageio.get_writer(output_gif, mode="I", duration=duration) as writer:
+        for filename in image_files:
+            image = imageio.imread(filename)
+            writer.append_data(image)
+
+    print(f"Animation saved as {output_gif}")
+
+
 
