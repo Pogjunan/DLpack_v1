@@ -525,7 +525,7 @@ def image_animation_7day2(pred_dir, target_dir, output_gif, font_path=None):
         print(f"Chunk {i} animation saved as {chunk_output_gif}")
 
 
-
+import time
 import numpy as np
 import imageio
 from PIL import Image, ImageDraw, ImageFont
