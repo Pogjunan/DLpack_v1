@@ -663,6 +663,11 @@ def animation_image_newcode(pred_dirs, target_dir, output_gif, font_path=None):
                 # 예측 파일이 없으면(None) 스킵
                 if pred_file is None:
                     continue
+
+
+
+                time.sleep(1)
+                
                 pred_img = Image.open(pred_file).convert("RGB")
 
                 w_pred, h_pred = pred_img.size
