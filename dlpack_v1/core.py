@@ -563,19 +563,7 @@ import imageio.v2 as imageio  # v2 인터페이스 사용
 import numpy as np
 import time  # 만약 디버깅용 딜레이가 필요하면 사용
 
-from pathlib import Path
-from datetime import timedelta
-from PIL import Image, ImageDraw, ImageFont
-import imageio.v2 as imageio  # v2 인터페이스 사용 (Deprecation Warning 회피)
-import numpy as np
-import time
-from pathlib import Path
-from datetime import timedelta
-from PIL import Image, ImageDraw, ImageFont
-import imageio.v2 as imageio
-import numpy as np
-
-def animation_image_newcode_grayscale(pred_dirs, target_dir, output_mp4, font_path=None):
+def animation_image_newcode(pred_dirs, target_dir, output_mp4, font_path=None):
     """
     pred_dirs: 예측 이미지를 모아둔 디렉터리들의 리스트
                예: ["rs_pred_0", "rs_pred_1", ...]
@@ -583,24 +571,23 @@ def animation_image_newcode_grayscale(pred_dirs, target_dir, output_mp4, font_pa
     output_mp4: 결과 MP4 동영상 저장 경로 (예: "result.mp4")
     font_path:  폰트 경로 (없으면 PIL Default Font)
     
-    --- 동작 개요 ---
-    1. 타겟 디렉터리의 PNG 파일(파일명→날짜/시간)과 예측 디렉터리들(파일명→날짜/시간)을 수집
-    2. 타겟 시간들을 7일씩 잘라 chunk화
-    3. 각 chunk에 대해, 시간(dt)별로 (예측 + 타겟)을 합성 → Grayscale로 변환 → (H,W) → (H,W,3) 복제
-    4. chunk별로 별도 MP4 파일(예: result_1.mp4, result_2.mp4, …) 생성
+    1. 타겟 디렉터리 내의 PNG 파일에서 파일명으로부터 날짜/시간을 파싱하여 target_dict[dt] = file_path를 만듭니다.
+    2. 예측 디렉터리들에 대해, 동일 시간(dt)에 해당하는 예측 이미지들을 모아 pred_dict[dt] = [file_dir0, file_dir1, ...] 형태로 만듭니다.
+    3. 타겟 시간들을 7일 단위로 chunk로 나눕니다.
+    4. 각 chunk 내에서, 각 dt마다 타겟 이미지와 그에 해당하는 예측 이미지들을 불러와 좌우로 합성(composite)한 후,
+       시간 텍스트와 날짜 범위 텍스트를 그려 넣고, 해당 프레임을 동영상의 한 프레임으로 추가합니다.
+    5. 각 chunk마다 별도의 MP4 파일을 생성합니다.
     """
-    import time
-    # parse_filename은 사용자가 이미 정의해놓은, 파일명 → datetime 변환 함수라 가정
-    
+    # 1. Path 변환
     pred_dirs = [Path(d) for d in pred_dirs]
     target_dir = Path(target_dir)
-    output_mp4 = Path(output_mp4)
+    output_mp4 = Path(output_mp4)  # 기본 출력 파일명(확장자 포함)
 
-    # 1) 타겟 파일 수집
+    # 2. 타겟 파일 수집: target_dict[dt] = target_file
     target_files = sorted(target_dir.glob("*.png"), key=lambda x: x.name)
     target_dict = {}
     for tf in target_files:
-        dt = parse_filename(tf.name)  # 사용자의 날짜 파싱 함수
+        dt = parse_filename(tf.name)
         if dt:
             target_dict[dt] = tf
 
@@ -609,9 +596,9 @@ def animation_image_newcode_grayscale(pred_dirs, target_dir, output_mp4, font_pa
         print("No target files found.")
         return
 
-    # 2) 예측 파일 수집
+    # 3. 예측 파일 수집: pred_dict[dt] = [file_from_dir0, file_from_dir1, ...]
     num_dirs = len(pred_dirs)
-    pred_dict = {}
+    pred_dict = {}  # 각 시간 dt에 대해, 길이가 num_dirs인 리스트(없으면 None)
     for i, pdir in enumerate(pred_dirs):
         files_in_dir = sorted(pdir.glob("*.png"), key=lambda x: x.name)
         for pf in files_in_dir:
@@ -621,12 +608,11 @@ def animation_image_newcode_grayscale(pred_dirs, target_dir, output_mp4, font_pa
                     pred_dict[dt] = [None] * num_dirs
                 pred_dict[dt][i] = pf
 
-    # 3) 7일 간격 Chunk 생성
+    # 4. 7일 간격으로 타겟 시간 chunk로 나누기
     chunks = []
     chunk = []
     start_time = target_times[0]
     end_time = start_time + timedelta(days=7)
-
     for dt in target_times:
         if dt < end_time:
             chunk.append(dt)
@@ -639,92 +625,92 @@ def animation_image_newcode_grayscale(pred_dirs, target_dir, output_mp4, font_pa
     if chunk:
         chunks.append(chunk)
 
-    # 폰트 설정
+    # 5. 폰트 설정
     if font_path and Path(font_path).exists():
         font = ImageFont.truetype(str(font_path), 20)
     else:
         font = ImageFont.load_default()
 
-    # 4) 각 chunk별 MP4 생성
+    # 6. 각 chunk별로 MP4 동영상 생성
+    # 원본 output_mp4의 이름을 기준으로, chunk별로 _1, _2, ... 접미사를 붙임.
     for idx, c_times in enumerate(chunks, start=1):
         if not c_times:
             continue
 
-        # chunk별 MP4 파일명
+        # 동영상 파일 이름 구성
         chunk_output_mp4 = output_mp4.parent / f"{output_mp4.stem}_{idx}.mp4"
-        writer = imageio.get_writer(
-            str(chunk_output_mp4),
-            fps=1,         # 1초에 1프레임
-            codec='libx264'
-        )
 
-        # 날짜 범위 텍스트
+        # MP4 writer 생성, fps=1 (즉, 각 프레임이 1초 동안 표시)
+        writer = imageio.get_writer(str(chunk_output_mp4), fps=1, codec='libx264')
+        
+        # 날짜 범위 텍스트 (예: "2022-07-01 ~ 2022-07-07")
         start_dt = c_times[0]
         end_dt = c_times[-1]
         date_range_text = f"{start_dt.strftime('%Y-%m-%d')} ~ {end_dt.strftime('%Y-%m-%d')}"
+        
+        out_w, out_h = None, None  # 합성 이미지의 최종 크기를 결정하기 위한 변수
 
-        out_w, out_h = None, None
-
+        # 각 chunk 내의 모든 타겟 시간에 대해
         for dt in c_times:
-            if dt not in target_dict:
-                continue
-            # 타겟 이미지를 Grayscale로 열기
-            target_path = target_dict[dt]
-            target_img = Image.open(target_path).convert("L")  # 'L' = 그레이스케일
-            w_tgt, h_tgt = target_img.size
-
+            # 타겟 이미지 로드 (RGB)
+            target_file = target_dict[dt]
+            target_img = Image.open(target_file).convert("RGB")
+            
+            # 해당 시간 dt에 해당하는 예측 이미지 리스트 (없으면 건너뛰기)
             if dt not in pred_dict:
                 continue
             pred_files_for_dt = pred_dict[dt]
-
-            for pf in pred_files_for_dt:
-                if pf is None:
+            
+            # 동일 시점에 대한 각 예측 이미지 순회
+            for pred_file in pred_files_for_dt:
+                if pred_file is None:
                     continue
-                # 예측이미지도 Grayscale로 열기
-                pred_img = Image.open(pf).convert("L")
-                w_pred, h_pred = pred_img.size
 
-                # 합성 결과: 좌측=pred_img, 우측=target_img
-                # 먼저, 전체 폭/높이 계산
+                # (실제 코드 실행 딜레이가 필요하면 time.sleep() 사용 가능; MP4 생성에는 필요 없음)
+                # time.sleep(1)
+                
+                pred_img = Image.open(pred_file).convert("RGB")
+                w_pred, h_pred = pred_img.size
+                w_tgt, h_tgt = target_img.size
+
+                # 첫 프레임에서 합성 캔버스 크기 결정
                 if out_w is None:
                     out_w = w_pred + w_tgt
-                    out_h = max(h_pred, h_tgt) + 50
+                    out_h = max(h_pred, h_tgt) + 50  # 하단에 텍스트를 위한 여유 공간
 
-                # 흰 배경(Grayscale 'L'은 단일채널이므로, 우선 'RGB'로 관리해도 무관)
-                # 하지만 최종적으로는 'L'로 이어붙이려면 아래 다른 방식을 써야 함.
-                # --> 여기서는 PIL 합성 편의를 위해 RGB로 일단 만든 뒤 최종적으로 다시 'L'로 변환
+                # 흰색 배경의 합성용 캔버스 생성
                 combined = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+                combined.paste(pred_img, (0, 0))
+                combined.paste(target_img, (w_pred, 0))
 
-                # pred_img, target_img은 현재 L 모드 → RGB 변환해서 paste해야 색 안 깨짐
-                pred_rgb = pred_img.convert("RGB")
-                target_rgb = target_img.convert("RGB")
-
-                combined.paste(pred_rgb, (0, 0))
-                combined.paste(target_rgb, (w_pred, 0))
-
+                # 텍스트 그리기
                 draw = ImageDraw.Draw(combined)
-
                 time_text = dt.strftime("%Y-%m-%d %H:%M")
                 bbox = font.getbbox(time_text)
                 tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                draw.text(((out_w - tw)/2, out_h - th - 5), time_text, fill="black", font=font)
-
+                draw.text(((out_w - tw) / 2, out_h - th - 5),
+                          time_text, fill="black", font=font)
                 bbox2 = font.getbbox(date_range_text)
                 trw, trh = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
-                draw.text(((out_w - trw)/2, out_h - th - trh - 30), date_range_text, fill="black", font=font)
-
-                # 이제 최종 이미지를 다시 'L' 모드(그레이스케일)로 변환
-                combined_gray = combined.convert("L")  # (H, W) 2D 배열
-
-                # NumPy 배열로 변환
-                frame_2d = np.array(combined_gray)   # shape=(H, W)
-                # MP4 인코더는 3채널(RGB)을 주로 요구하므로, 3채널 복제
-                frame_3ch = np.repeat(frame_2d[:, :, None], 3, axis=2)  # shape=(H, W, 3)
-
-                try:
-                    writer.append_data(frame_3ch)
-                except Exception as e:
-                    print(f"[Error] {pf} 추가 중 오류: {e}")
-
+                draw.text(((out_w - trw) / 2, out_h - th - trh - 30),
+                          date_range_text, fill="black", font=font)
+                
+                # 최종 합성 이미지 numpy 배열로 변환 후 MP4 writer에 추가
+                frame_array = np.array(combined)
+                writer.append_data(frame_array)
+        
         writer.close()
-        print(f"Chunk {idx} animation (Grayscale) saved as {chunk_output_mp4}")
+        print(f"Chunk {idx} 동영상이 생성되었습니다: {chunk_output_mp4}")
+
+# =============================================================================
+# 사용 예시:
+# =============================================================================
+# 예시: pred_dirs 리스트와 target_dir, 그리고 출력 MP4 파일의 기본 경로 지정
+# pred_dirs = ["rs_pred_0", "rs_pred_1", "rs_pred_2", ...]
+# target_dir = "rs_target_0"
+# output_mp4 = "result.mp4"
+# font_path = "path/to/font.ttf"  (옵션)
+
+# 예시로 아래와 같이 호출:
+# animation_image_newcode(["rs_pred_0", "rs_pred_1", "rs_pred_2"], "rs_target_0", "result.mp4", font_path="arial.ttf")
+
