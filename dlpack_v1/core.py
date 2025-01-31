@@ -562,28 +562,48 @@ from PIL import Image, ImageDraw, ImageFont
 import imageio.v2 as imageio  # v2 인터페이스 사용
 import numpy as np
 import time  # 만약 디버깅용 딜레이가 필요하면 사용
+from pathlib import Path
+from datetime import timedelta
+from PIL import Image, ImageDraw, ImageFont
+import imageio.v2 as imageio
+import numpy as np
 
-def animation_image_newcode(pred_dirs, target_dir, output_mp4, font_path=None):
+from pathlib import Path
+from datetime import timedelta
+from PIL import Image, ImageDraw, ImageFont
+import imageio.v2 as imageio
+import numpy as np
+
+def animation_image_newcode_mp4(pred_dirs, target_dir, output_mp4, font_path=None):
     """
-    pred_dirs: 예측 이미지를 모아둔 디렉터리들의 리스트
-               예: ["rs_pred_0", "rs_pred_1", ...]
+    pred_dirs: 예측 이미지를 모아둔 디렉터리들의 리스트 (예: ["rs_pred_0", "rs_pred_1", ...])
     target_dir: 타겟 이미지를 모아둔 디렉터리 (예: "rs_target_0")
     output_mp4: 결과 MP4 동영상 저장 경로 (예: "result.mp4")
     font_path:  폰트 경로 (없으면 PIL Default Font)
     
-    1. 타겟 디렉터리 내의 PNG 파일에서 파일명으로부터 날짜/시간을 파싱하여 target_dict[dt] = file_path를 만듭니다.
-    2. 예측 디렉터리들에 대해, 동일 시간(dt)에 해당하는 예측 이미지들을 모아 pred_dict[dt] = [file_dir0, file_dir1, ...] 형태로 만듭니다.
-    3. 타겟 시간들을 7일 단위로 chunk로 나눕니다.
-    4. 각 chunk 내에서, 각 dt마다 타겟 이미지와 그에 해당하는 예측 이미지들을 불러와 좌우로 합성(composite)한 후,
-       시간 텍스트와 날짜 범위 텍스트를 그려 넣고, 해당 프레임을 동영상의 한 프레임으로 추가합니다.
-    5. 각 chunk마다 별도의 MP4 파일을 생성합니다.
+    동작 개요:
+      1. 타겟 디렉터리의 PNG 파일들에서 파일명으로부터 날짜/시간 정보를 파싱하여
+         target_dict[dt] = 파일경로 로 구성합니다.
+      2. 예측 디렉터리들에 대해, 동일 시간(dt)에 해당하는 예측 이미지들을 모아
+         pred_dict[dt] = [파일경로_dir0, 파일경로_dir1, ...] 로 구성합니다.
+      3. 타겟 시간들을 7일 단위로 분할하여 chunk를 구성합니다.
+      4. 각 chunk 내에서 각 시각(dt)에 대해, 왼쪽에는 예측 이미지, 오른쪽에는 타겟 이미지를 붙이고,
+         하단에 시간/날짜 텍스트를 그린 후, 추가 여백 영역에 예측 디렉터리 이름(예: "rs_pred_0")을 중앙 아래쪽에 표시한
+         하나의 합성 프레임을 생성합니다.
+      5. 각 chunk마다 생성된 프레임들을 모아 imageio.mimsave()를 통해 MP4 동영상을 생성합니다.
+    
+    전제:
+      - 모든 예측(pred) 및 타겟(target) 이미지는 512×512 크기의 RGB 이미지 (shape=(512,512,3))임.
+      - parse_filename(filename) 함수는 파일명에서 datetime 객체를 반환한다고 가정.
+      - 합성 캔버스는 좌우 합성으로 가로 512+512=1024, 세로는 512에 기본 텍스트 여백 50픽셀을 더해 562 픽셀이며,
+        여기에 추가로 extra_margin(예, 30픽셀)을 더하여 전체 캔버스 높이를 562+30=592로 사용합니다.
     """
-    # 1. Path 변환
+    # 1. 경로 객체 변환
     pred_dirs = [Path(d) for d in pred_dirs]
     target_dir = Path(target_dir)
-    output_mp4 = Path(output_mp4)  # 기본 출력 파일명(확장자 포함)
+    output_mp4 = Path(output_mp4)
 
-    # 2. 타겟 파일 수집: target_dict[dt] = target_file
+    # 2. 타겟 파일 수집: target_dict[dt] = target 파일 경로
     target_files = sorted(target_dir.glob("*.png"), key=lambda x: x.name)
     target_dict = {}
     for tf in target_files:
@@ -596,19 +616,18 @@ def animation_image_newcode(pred_dirs, target_dir, output_mp4, font_path=None):
         print("No target files found.")
         return
 
-    # 3. 예측 파일 수집: pred_dict[dt] = [file_from_dir0, file_from_dir1, ...]
+    # 3. 예측 파일 수집: pred_dict[dt] = [파일경로, ...]
     num_dirs = len(pred_dirs)
-    pred_dict = {}  # 각 시간 dt에 대해, 길이가 num_dirs인 리스트(없으면 None)
+    pred_dict = {}
     for i, pdir in enumerate(pred_dirs):
-        files_in_dir = sorted(pdir.glob("*.png"), key=lambda x: x.name)
-        for pf in files_in_dir:
+        for pf in sorted(pdir.glob("*.png"), key=lambda x: x.name):
             dt = parse_filename(pf.name)
             if dt:
                 if dt not in pred_dict:
                     pred_dict[dt] = [None] * num_dirs
                 pred_dict[dt][i] = pf
 
-    # 4. 7일 간격으로 타겟 시간 chunk로 나누기
+    # 4. 7일 간격으로 타겟 시간 chunk 분할
     chunks = []
     chunk = []
     start_time = target_times[0]
@@ -631,86 +650,99 @@ def animation_image_newcode(pred_dirs, target_dir, output_mp4, font_path=None):
     else:
         font = ImageFont.load_default()
 
-    # 6. 각 chunk별로 MP4 동영상 생성
-    # 원본 output_mp4의 이름을 기준으로, chunk별로 _1, _2, ... 접미사를 붙임.
+    extra_margin = 30  # 예측 디렉터리 이름을 넣을 추가 여백
+
+    # 6. 각 chunk별로 프레임 생성 및 MP4 저장 (fps=1)
     for idx, c_times in enumerate(chunks, start=1):
         if not c_times:
             continue
 
-        # 동영상 파일 이름 구성
-        chunk_output_mp4 = output_mp4.parent / f"{output_mp4.stem}_{idx}.mp4"
-
-        # MP4 writer 생성, fps=1 (즉, 각 프레임이 1초 동안 표시)
-        writer = imageio.get_writer(str(chunk_output_mp4), fps=1, codec='libx264')
-        
-        # 날짜 범위 텍스트 (예: "2022-07-01 ~ 2022-07-07")
+        frames = []
         start_dt = c_times[0]
         end_dt = c_times[-1]
         date_range_text = f"{start_dt.strftime('%Y-%m-%d')} ~ {end_dt.strftime('%Y-%m-%d')}"
-        
-        out_w, out_h = None, None  # 합성 이미지의 최종 크기를 결정하기 위한 변수
+        out_w, base_h = None, None
 
-        # 각 chunk 내의 모든 타겟 시간에 대해
         for dt in c_times:
-            # 타겟 이미지 로드 (RGB)
+            if dt not in target_dict:
+                continue
             target_file = target_dict[dt]
             target_img = Image.open(target_file).convert("RGB")
-            
-            # 해당 시간 dt에 해당하는 예측 이미지 리스트 (없으면 건너뛰기)
+
             if dt not in pred_dict:
                 continue
             pred_files_for_dt = pred_dict[dt]
-            
-            # 동일 시점에 대한 각 예측 이미지 순회
+
             for pred_file in pred_files_for_dt:
                 if pred_file is None:
                     continue
 
-                # (실제 코드 실행 딜레이가 필요하면 time.sleep() 사용 가능; MP4 생성에는 필요 없음)
-                # time.sleep(1)
-                
                 pred_img = Image.open(pred_file).convert("RGB")
-                w_pred, h_pred = pred_img.size
-                w_tgt, h_tgt = target_img.size
+                w_pred, h_pred = pred_img.size  # 보통 (512,512)
+                w_tgt, h_tgt = target_img.size   # (512,512)
 
-                # 첫 프레임에서 합성 캔버스 크기 결정
                 if out_w is None:
-                    out_w = w_pred + w_tgt
-                    out_h = max(h_pred, h_tgt) + 50  # 하단에 텍스트를 위한 여유 공간
+                    out_w = w_pred + w_tgt   # 512+512 = 1024
+                    base_h = max(h_pred, h_tgt) + 50  # 512 + 50 = 562
 
-                # 흰색 배경의 합성용 캔버스 생성
-                combined = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+                # 합성 캔버스 생성 (기존 합성 이미지)
+                combined = Image.new("RGB", (out_w, base_h), (255, 255, 255))
                 combined.paste(pred_img, (0, 0))
                 combined.paste(target_img, (w_pred, 0))
 
-                # 텍스트 그리기
+                # 텍스트 추가 (시간, 날짜 범위) - 하단 중앙에 그림
                 draw = ImageDraw.Draw(combined)
                 time_text = dt.strftime("%Y-%m-%d %H:%M")
                 bbox = font.getbbox(time_text)
                 tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                draw.text(((out_w - tw) / 2, out_h - th - 5),
+                draw.text(((out_w - tw) / 2, base_h - th - 5),
                           time_text, fill="black", font=font)
                 bbox2 = font.getbbox(date_range_text)
                 trw, trh = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
-                draw.text(((out_w - trw) / 2, out_h - th - trh - 30),
+                draw.text(((out_w - trw) / 2, base_h - th - trh - 30),
                           date_range_text, fill="black", font=font)
-                
-                # 최종 합성 이미지 numpy 배열로 변환 후 MP4 writer에 추가
-                frame_array = np.array(combined)
-                writer.append_data(frame_array)
-        
-        writer.close()
-        print(f"Chunk {idx} 동영상이 생성되었습니다: {chunk_output_mp4}")
+
+                # 새 캔버스 생성: 기존 합성 이미지 위에 extra_margin 만큼의 여백 추가
+                new_h = base_h + extra_margin  # 총 높이 562 + 30 = 592
+                new_canvas = Image.new("RGB", (out_w, new_h), (255, 255, 255))
+                new_canvas.paste(combined, (0, 0))
+                draw_new = ImageDraw.Draw(new_canvas)
+                # 예측 디렉터리 이름 (pred_source) 가져오기
+                pred_source = pred_file.parent.name
+                bbox_src = font.getbbox(pred_source)
+                sw, sh = bbox_src[2] - bbox_src[0], bbox_src[3] - bbox_src[1]
+                x_src = (out_w - sw) // 2
+                y_src = base_h + (extra_margin - sh) // 2
+                draw_new.text((x_src, y_src), pred_source, fill="black", font=font)
+
+                # 최종 프레임 배열
+                frame_array = np.array(new_canvas)
+                frame_array = np.ascontiguousarray(frame_array)
+                if frame_array.shape != (new_h, out_w, 3):
+                    continue
+
+                frames.append(frame_array)
+
+        if not frames:
+            print(f"No valid frames in chunk {idx}. Skipping MP4 generation.")
+            continue
+
+        chunk_output_mp4 = output_mp4.parent / f"{output_mp4.stem}_{idx}.mp4"
+        try:
+            imageio.mimsave(str(chunk_output_mp4), frames, fps=1, codec='libx264')
+            print(f"Chunk {idx} MP4 saved as {chunk_output_mp4}")
+        except Exception as e:
+            print(f"Error saving chunk {idx} MP4: {e}")
 
 # =============================================================================
 # 사용 예시:
 # =============================================================================
-# 예시: pred_dirs 리스트와 target_dir, 그리고 출력 MP4 파일의 기본 경로 지정
-# pred_dirs = ["rs_pred_0", "rs_pred_1", "rs_pred_2", ...]
+# pred_dirs = ["rs_pred_0", "rs_pred_1", "rs_pred_2", "rs_pred_3", "rs_pred_4", "rs_pred_5"]
 # target_dir = "rs_target_0"
-# output_mp4 = "result.mp4"
-# font_path = "path/to/font.ttf"  (옵션)
+# output_mp4 = "lp_0_animation.mp4"
+# font_path = "arial.ttf"  (옵션)
+#
+# 예시 호출:
+# animation_image_newcode_mp4(pred_dirs, target_dir, output_mp4, font_path)
 
-# 예시로 아래와 같이 호출:
-# animation_image_newcode(["rs_pred_0", "rs_pred_1", "rs_pred_2"], "rs_target_0", "result.mp4", font_path="arial.ttf")
 
