@@ -524,3 +524,136 @@ def image_animation_7day2(pred_dir, target_dir, output_gif, font_path=None):
         imageio.mimsave(chunk_output_gif, frames, duration=durations, loop=0)
         print(f"Chunk {i} animation saved as {chunk_output_gif}")
 
+
+import numpy as np
+import imageio
+from PIL import Image, ImageDraw, ImageFont
+from pathlib import Path
+from datetime import timedelta
+
+def animation_image_newcode(pred_dir, target_dir, output_gif, font_path=None):
+    pred_dir = Path(pred_dir)
+    target_dir = Path(target_dir)
+    output_gif = Path(output_gif)  # Path 객체로 변환
+
+    # 1) 타겟 파일 목록 수집
+    target_files = sorted(target_dir.glob("*.png"), key=lambda x: x.name)
+    target_dict = {}
+    for tf in target_files:
+        dt = parse_filename(tf.name)  # 사용자가 정의한 시간 파싱 함수
+        if dt:
+            target_dict[dt] = tf
+
+    # 2) 예측 파일 목록 수집
+    pred_files = sorted(pred_dir.glob("*.png"), key=lambda x: x.name)
+    pred_dict = {}
+    for pf in pred_files:
+        dt = parse_filename(pf.name)
+        if dt:
+            # 동일 시간대에 여러 예측파일이 있을 수 있으므로 리스트로 관리
+            if dt not in pred_dict:
+                pred_dict[dt] = []
+            pred_dict[dt].append(pf)
+
+    # 타겟 시간들을 오름차순으로 정렬
+    target_times = sorted(target_dict.keys())
+    if not target_times:
+        print("No target files found.")
+        return
+
+    # 3) 7일 간격으로 시간 슬라이스(Chunk) 생성
+    chunks = []
+    chunk = []
+    start_time = target_times[0]
+    end_time = start_time + timedelta(days=7)
+
+    for dt in target_times:
+        if dt < end_time:
+            chunk.append(dt)
+        else:
+            if chunk:
+                chunks.append(chunk)
+            chunk = [dt]
+            start_time = dt
+            end_time = dt + timedelta(days=7)
+    if chunk:
+        chunks.append(chunk)
+
+    # 4) 폰트 설정
+    if font_path and Path(font_path).exists():
+        font = ImageFont.truetype(str(font_path), 20)
+    else:
+        font = ImageFont.load_default()
+
+    # 5) 각 7일 chunk마다 별도의 GIF 생성
+    for i, c_times in enumerate(chunks, start=1):
+        if not c_times:
+            continue
+
+        frames = []
+        durations = []  # 각 frame에 대한 지속 시간
+
+        # 이 chunk의 시작~끝 날짜 범위
+        start_dt = c_times[0]
+        end_dt = c_times[-1]
+        date_range_text = f"{start_dt.strftime('%Y-%m-%d')} ~ {end_dt.strftime('%Y-%m-%d')}"
+
+        out_w, out_h = None, None
+
+        # (a) chunk 내 모든 타겟 시간 순회
+        for dt in c_times:
+            # 타겟 이미지는 무조건 1개
+            target_file = target_dict[dt]
+            target_img = Image.open(target_file).convert("RGB")
+
+            # 해당 dt에 대응되는 예측 이미지들 가져오기
+            if dt not in pred_dict:
+                # 예측 이미지가 없으면 스킵
+                continue
+
+            pred_files_for_dt = pred_dict[dt]
+
+            # (b) 이 시간대에 있는 여러 예측 이미지를 순회하며 Frame 생성
+            for pred_file in pred_files_for_dt:
+                pred_img = Image.open(pred_file).convert("RGB")
+
+                w1, h1 = pred_img.size
+                w2, h2 = target_img.size
+
+                if out_w is None:
+                    out_w = w1 + w2
+                    out_h = max(h1, h2) + 50  # 아래 50px 정도 여유 공간(텍스트용)
+
+                combined = Image.new("RGB", (out_w, out_h), (255, 255, 255))
+                combined.paste(pred_img, (0, 0))
+                combined.paste(target_img, (w1, 0))
+
+                draw = ImageDraw.Draw(combined)
+
+                # 시간 텍스트 (가운데 아래)
+                time_text = dt.strftime("%Y-%m-%d %H:%M")
+                bbox = font.getbbox(time_text)
+                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                draw.text(((out_w - tw) / 2, out_h - th - 5),
+                          time_text, fill="black", font=font)
+
+                # 날짜 범위 텍스트 (그 위쪽)
+                bbox = font.getbbox(date_range_text)
+                trw, trh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                draw.text(((out_w - trw) / 2, out_h - th - trh - 30),
+                          date_range_text, fill="black", font=font)
+
+                # Frame 배열에 추가
+                frames.append(np.array(combined))
+                durations.append(1.0)  # (2) 요청하신대로 1초씩 고정
+
+        if not frames:
+            print(f"No valid predict/target pairs in chunk {i}. Skipping GIF creation.")
+            continue
+
+        # 6) 애니메이션 저장
+        chunk_output_gif = output_gif.parent / f"{output_gif.stem}_{i}{output_gif.suffix}"
+        imageio.mimsave(chunk_output_gif, frames, duration=durations, loop=0)
+        print(f"Chunk {i} animation saved as {chunk_output_gif}")
+
+
