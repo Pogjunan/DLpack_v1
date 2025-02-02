@@ -746,3 +746,173 @@ def animation_image_newcode_mp4(pred_dirs, target_dir, output_mp4, font_path=Non
 # animation_image_newcode_mp4(pred_dirs, target_dir, output_mp4, font_path)
 
 
+
+import numpy as np
+from pathlib import Path
+from datetime import timedelta
+import imageio
+from PIL import Image, ImageDraw, ImageFont
+
+# parse_filename 함수는 파일명에서 datetime 객체를 반환한다고 가정합니다.
+# 예: def parse_filename(fname): ... return datetime_object
+import numpy as np
+from pathlib import Path
+from datetime import timedelta
+import imageio
+from PIL import Image, ImageDraw, ImageFont
+
+# parse_filename 함수는 파일명에서 datetime 객체를 반환한다고 가정합니다.
+# 예: def parse_filename(fname): ... return datetime_object
+
+def animation_image_newcode_mp4_new(pred_dirs, target_dir, output_mp4, font_path=None):
+    """
+    새로운 방식의 MP4 동영상 생성 함수.
+    
+    동작 개요:
+      1. 기준시간(base time)을 결정한다.
+      2. 기준시간에 해당하는 target 디렉터리의 이미지를 왼쪽에 배치한다.
+      3. 오른쪽에는 각 pred 디렉터리(예: pred_0, pred_1, pred_2, pred_3)에서 
+         기준시간에 대해 +30분, +60분, +90분, +120분에 해당하는 예측 이미지를 순서대로 배치한다.
+      4. 한 기준시간에 대해 각 pred 디렉터리마다 하나의 composite frame을 생성한다.
+      5. 작업 완료 후, 기준시간을 기준시간 + 150분으로 갱신하고, 해당 시간에 맞는 입력 이미지들이 존재하는지 확인한 후 반복한다.
+         (만약 갱신된 기준시간에 타겟 이미지가 없으면 "건너뜁니다" 메시지를 출력하고 다음 시간으로 진행합니다.)
+    """
+    # 1. 경로 객체 변환
+    pred_dirs = [Path(d) for d in pred_dirs]
+    target_dir = Path(target_dir)
+    output_mp4 = Path(output_mp4)
+    
+    # 2. 타겟 파일 수집: target_dict[dt] = 타겟 파일 경로
+    target_files = sorted(target_dir.glob("*.png"), key=lambda x: x.name)
+    target_dict = {}
+    for tf in target_files:
+        dt = parse_filename(tf.name)
+        if dt:
+            target_dict[dt] = tf
+    if not target_dict:
+        print("No target files found.")
+        return
+    
+    # 3. 각 pred 디렉터리에 대해 시간별 파일 딕셔너리 생성: pred_dicts[Path] = { dt: file, ... }
+    pred_dicts = {}
+    for pd in pred_dirs:
+        files = sorted(pd.glob("*.png"), key=lambda x: x.name)
+        temp_dict = {}
+        for f in files:
+            dt = parse_filename(f.name)
+            if dt:
+                temp_dict[dt] = f
+        pred_dicts[pd] = temp_dict
+
+    # 4. 기준시간을 target_dict의 가장 이른 시간(혹은 원하는 시작 시간)으로 설정
+    sorted_target_times = sorted(target_dict.keys())
+    base_time = sorted_target_times[0]
+    
+    frames = []
+    while True:
+        # 5. 기준시간에 해당하는 target 이미지가 존재하는지 확인
+        if base_time not in target_dict:
+            print(f"기준시간 {base_time}에 해당하는 타겟 이미지가 없습니다. 건너뜁니다.")
+            # base_time을 다음 시간으로 갱신하고 계속 진행
+            base_time = base_time + timedelta(minutes=150)
+            # 만약 기준시간이 전체 타겟 범위를 벗어나면 종료
+            if base_time > sorted_target_times[-1]:
+                print("더 이상 기준시간에 해당하는 타겟 이미지가 없습니다. 종료합니다.")
+                break
+            continue
+        try:
+            target_img = Image.open(target_dict[base_time]).convert("RGB")
+        except Exception as e:
+            print(f"기준시간 {base_time} 타겟 이미지 로드 에러: {e}")
+            base_time = base_time + timedelta(minutes=150)
+            if base_time > sorted_target_times[-1]:
+                print("더 이상 기준시간에 해당하는 타겟 이미지가 없습니다. 종료합니다.")
+                break
+            continue
+
+        # 6. 각 pred 디렉터리(앞 4개)에 대해 composite frame 생성
+        for pd in pred_dirs[:4]:
+            pd_dict = pred_dicts[pd]
+            # 필요한 예측 시간: base_time + 30, 60, 90, 120분
+            offsets = [30, 60, 90, 120]
+            req_times = [base_time + timedelta(minutes=m) for m in offsets]
+            if any(t not in pd_dict for t in req_times):
+                print(f"디렉터리 {pd.name}에는 기준시간 {base_time}에 대한 필수 예측 이미지들이 부족합니다. 건너뜁니다.")
+                continue
+            try:
+                img_30  = Image.open(pd_dict[base_time + timedelta(minutes=30)]).convert("RGB")
+                img_60  = Image.open(pd_dict[base_time + timedelta(minutes=60)]).convert("RGB")
+                img_90  = Image.open(pd_dict[base_time + timedelta(minutes=90)]).convert("RGB")
+                img_120 = Image.open(pd_dict[base_time + timedelta(minutes=120)]).convert("RGB")
+            except Exception as e:
+                print(f"디렉터리 {pd.name}에서 기준시간 {base_time} 예측 이미지 로드 에러: {e}")
+                continue
+            
+            # 7. 합성 캔버스 생성  
+            #    - 각 이미지는 512×512 (가정)
+            #    - 왼쪽: target 이미지 (기준시간), 오른쪽: 4개의 예측 이미지
+            single_w, single_h = 512, 512
+            composite_w = single_w * 5  # 1 + 4 = 5 칸
+            composite_h = single_h + 50  # 하단 텍스트 여백 50픽셀
+            composite = Image.new("RGB", (composite_w, composite_h), (255, 255, 255))
+            
+            # 왼쪽 첫 칸: target 이미지 (기준시간)
+            composite.paste(target_img, (0, 0))
+            # 오른쪽 4칸: 예측 이미지 (순서대로 base_time+30, +60, +90, +120)
+            composite.paste(img_30,  (single_w * 1, 0))
+            composite.paste(img_60,  (single_w * 2, 0))
+            composite.paste(img_90,  (single_w * 3, 0))
+            composite.paste(img_120, (single_w * 4, 0))
+            
+            # 8. 하단 여백에 텍스트 추가
+            draw = ImageDraw.Draw(composite)
+            if font_path and Path(font_path).exists():
+                font = ImageFont.truetype(str(font_path), 20)
+            else:
+                font = ImageFont.load_default()
+            
+            # 예시: 기준시간 텍스트를 왼쪽 칸 하단 중앙에 표시
+            base_time_text = base_time.strftime("%Y-%m-%d %H:%M")
+            bbox = font.getbbox(base_time_text)
+            tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
+            x_text = (single_w - tw) / 2   # 왼쪽 칸 내 중앙
+            y_text = single_h + (50 - th) / 2
+            draw.text((x_text, y_text), base_time_text, fill="black", font=font)
+            
+            # 예시: 현재 예측 디렉터리 이름을 전체 캔버스 하단 중앙에 표시
+            pred_source = pd.name
+            bbox_src = font.getbbox(pred_source)
+            sw, sh = bbox_src[2]-bbox_src[0], bbox_src[3]-bbox_src[1]
+            x_src = (composite_w - sw) / 2
+            y_src = single_h + (50 - sh) / 2
+            draw.text((x_src, y_src), pred_source, fill="black", font=font)
+            
+            # 9. composite frame을 numpy 배열로 변환하여 프레임 리스트에 추가
+            frame_array = np.array(composite)
+            frames.append(frame_array)
+        
+        # 10. 기준시간 갱신: 현재 기준시간에서 150분 뒤의 시간으로 설정
+        new_base_time = base_time + timedelta(minutes=150)
+        # 만약 새 기준시간이 전체 타겟 범위를 벗어나면 종료
+        if new_base_time > sorted_target_times[-1]:
+            print(f"새 기준시간 {new_base_time}가 타겟 이미지 범위를 벗어납니다. 종료합니다.")
+            break
+        # 타겟 이미지가 없으면 건너뛰고 다음 기준시간으로 진행
+        if new_base_time not in target_dict:
+            print(f"새 기준시간 {new_base_time}에 해당하는 타겟 이미지가 없어 건너뜁니다.")
+            base_time = new_base_time
+            continue
+        base_time = new_base_time
+
+    if not frames:
+        print("생성된 프레임이 없습니다.")
+        return
+    
+    # 11. 프레임 리스트를 MP4 동영상으로 저장 (fps=1)
+    try:
+        imageio.mimsave(str(output_mp4), frames, fps=1, codec='libx264')
+        print(f"MP4 동영상이 {output_mp4}로 저장되었습니다.")
+    except Exception as e:
+        print(f"MP4 저장 에러: {e}")
+
+
