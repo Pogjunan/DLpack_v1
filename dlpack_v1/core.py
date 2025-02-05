@@ -763,25 +763,53 @@ from PIL import Image, ImageDraw, ImageFont
 # parse_filename 함수는 파일명에서 datetime 객체를 반환한다고 가정합니다.
 # 예: def parse_filename(fname): ... return datetime_object
 
+import numpy as np
+import imageio
+from pathlib import Path
+from datetime import timedelta, datetime
+from PIL import Image, ImageDraw, ImageFont
+import re
+
+def parse_filename(fname):
+    """
+    파일명에서 'YYYY-MM-DD_HHMM' 패턴을 추출하여 datetime 객체를 반환합니다.
+    예: "2022-07-01_0500_1_predicted.png" -> datetime(2022, 7, 1, 5, 0)
+    """
+    pattern = r'(\d{4}-\d{2}-\d{2})_(\d{4})'
+    match = re.search(pattern, fname)
+    if match:
+        date_str, time_str = match.groups()
+        try:
+            dt = datetime.strptime(date_str + time_str, '%Y-%m-%d%H%M')
+            return dt
+        except Exception as e:
+            print(f"Error parsing datetime from {fname}: {e}")
+    return None
+
 def animation_image_newcode_mp4_new(pred_dirs, target_dir, output_mp4, font_path=None):
     """
-    새로운 방식의 MP4 동영상 생성 함수.
-    
-    동작 개요:
-      1. 기준시간(base time)을 결정한다.
-      2. 기준시간에 해당하는 target 디렉터리의 이미지를 왼쪽에 배치한다.
-      3. 오른쪽에는 각 pred 디렉터리(예: pred_0, pred_1, pred_2, pred_3)에서 
-         기준시간에 대해 +30분, +60분, +90분, +120분에 해당하는 예측 이미지를 순서대로 배치한다.
-      4. 한 기준시간에 대해 각 pred 디렉터리마다 하나의 composite frame을 생성한다.
-      5. 작업 완료 후, 기준시간을 기준시간 + 150분으로 갱신하고, 해당 시간에 맞는 입력 이미지들이 존재하는지 확인한 후 반복한다.
-         (만약 갱신된 기준시간에 타겟 이미지가 없으면 "건너뜁니다" 메시지를 출력하고 다음 시간으로 진행합니다.)
+    [수정된 알고리즘]
+    - target_dir에서 30분 간격으로 촬영된 이미지들을 시간순으로 정렬합니다.
+    - 슬라이딩 윈도우로 연속된 3개의 target 이미지를 선택하고,
+      각 컬럼의 시간에 맞춰 pred_dirs의 해당 예측 이미지를 가져옵니다.
+        * 첫 번째 컬럼: target 시간 t₀ (예측: 30분 후, pred_dirs[0])
+        * 두 번째 컬럼: target 시간 t₁ (예측: 60분 후, pred_dirs[1])
+        * 세 번째 컬럼: target 시간 t₂ (예측: 90분 후, pred_dirs[2])
+    - 한 프레임은 2행 3열 매트릭스 형태로 구성되며,
+         상단 행: 예측 이미지  
+         하단 행: target 이미지  
+      각 셀 하단에는 해당 날짜/시간 텍스트를 표시하는데, 기존 위치보다 30픽셀 아래에 그립니다.
+    - 추가로, 상단 예측 이미지 영역 바로 위(사진 바깥 위, 헤더 영역)에 각 컬럼별로
+         "After 30 minutes", "After 60 minutes", "After 90 minutes"
+      텍스트를 중앙 정렬하여 표시합니다.
+    - 30분씩 기준시간을 슬라이딩하며, 1초마다 프레임이 전환되는 MP4 동영상으로 저장합니다.
     """
     # 1. 경로 객체 변환
     pred_dirs = [Path(d) for d in pred_dirs]
     target_dir = Path(target_dir)
     output_mp4 = Path(output_mp4)
     
-    # 2. 타겟 파일 수집: target_dict[dt] = 타겟 파일 경로
+    # 2. target 파일 수집: target_dict[datetime] = 파일경로
     target_files = sorted(target_dir.glob("*.png"), key=lambda x: x.name)
     target_dict = {}
     for tf in target_files:
@@ -792,7 +820,7 @@ def animation_image_newcode_mp4_new(pred_dirs, target_dir, output_mp4, font_path
         print("No target files found.")
         return
     
-    # 3. 각 pred 디렉터리에 대해 시간별 파일 딕셔너리 생성: pred_dicts[Path] = { dt: file, ... }
+    # 3. 각 예측 디렉터리에 대해 시간별 파일 딕셔너리 생성
     pred_dicts = {}
     for pd in pred_dirs:
         files = sorted(pd.glob("*.png"), key=lambda x: x.name)
@@ -803,115 +831,137 @@ def animation_image_newcode_mp4_new(pred_dirs, target_dir, output_mp4, font_path
                 temp_dict[dt] = f
         pred_dicts[pd] = temp_dict
 
-    # 4. 기준시간을 target_dict의 가장 이른 시간(혹은 원하는 시작 시간)으로 설정
+    # 4. target 시간 정렬 (30분 간격이라 가정)
     sorted_target_times = sorted(target_dict.keys())
-    base_time = sorted_target_times[0]
     
+    # 슬라이딩 윈도우: 3개 연속 이미지 사용
     frames = []
-    while True:
-        # 5. 기준시간에 해당하는 target 이미지가 존재하는지 확인
-        if base_time not in target_dict:
-            print(f"기준시간 {base_time}에 해당하는 타겟 이미지가 없습니다. 건너뜁니다.")
-            # base_time을 다음 시간으로 갱신하고 계속 진행
-            base_time = base_time + timedelta(minutes=150)
-            # 만약 기준시간이 전체 타겟 범위를 벗어나면 종료
-            if base_time > sorted_target_times[-1]:
-                print("더 이상 기준시간에 해당하는 타겟 이미지가 없습니다. 종료합니다.")
-                break
-            continue
-        try:
-            target_img = Image.open(target_dict[base_time]).convert("RGB")
-        except Exception as e:
-            print(f"기준시간 {base_time} 타겟 이미지 로드 에러: {e}")
-            base_time = base_time + timedelta(minutes=150)
-            if base_time > sorted_target_times[-1]:
-                print("더 이상 기준시간에 해당하는 타겟 이미지가 없습니다. 종료합니다.")
-                break
-            continue
-
-        # 6. 각 pred 디렉터리(앞 4개)에 대해 composite frame 생성
-        for pd in pred_dirs[:4]:
-            pd_dict = pred_dicts[pd]
-            # 필요한 예측 시간: base_time + 30, 60, 90, 120분
-            offsets = [30, 60, 90, 120]
-            req_times = [base_time + timedelta(minutes=m) for m in offsets]
-            if any(t not in pd_dict for t in req_times):
-                print(f"디렉터리 {pd.name}에는 기준시간 {base_time}에 대한 필수 예측 이미지들이 부족합니다. 건너뜁니다.")
-                continue
-            try:
-                img_30  = Image.open(pd_dict[base_time + timedelta(minutes=30)]).convert("RGB")
-                img_60  = Image.open(pd_dict[base_time + timedelta(minutes=60)]).convert("RGB")
-                img_90  = Image.open(pd_dict[base_time + timedelta(minutes=90)]).convert("RGB")
-                img_120 = Image.open(pd_dict[base_time + timedelta(minutes=120)]).convert("RGB")
-            except Exception as e:
-                print(f"디렉터리 {pd.name}에서 기준시간 {base_time} 예측 이미지 로드 에러: {e}")
-                continue
-            
-            # 7. 합성 캔버스 생성  
-            #    - 각 이미지는 512×512 (가정)
-            #    - 왼쪽: target 이미지 (기준시간), 오른쪽: 4개의 예측 이미지
-            single_w, single_h = 512, 512
-            composite_w = single_w * 5  # 1 + 4 = 5 칸
-            composite_h = single_h + 50  # 하단 텍스트 여백 50픽셀
-            composite = Image.new("RGB", (composite_w, composite_h), (255, 255, 255))
-            
-            # 왼쪽 첫 칸: target 이미지 (기준시간)
-            composite.paste(target_img, (0, 0))
-            # 오른쪽 4칸: 예측 이미지 (순서대로 base_time+30, +60, +90, +120)
-            composite.paste(img_30,  (single_w * 1, 0))
-            composite.paste(img_60,  (single_w * 2, 0))
-            composite.paste(img_90,  (single_w * 3, 0))
-            composite.paste(img_120, (single_w * 4, 0))
-            
-            # 8. 하단 여백에 텍스트 추가
-            draw = ImageDraw.Draw(composite)
-            if font_path and Path(font_path).exists():
-                font = ImageFont.truetype(str(font_path), 20)
-            else:
-                font = ImageFont.load_default()
-            
-            # 예시: 기준시간 텍스트를 왼쪽 칸 하단 중앙에 표시
-            base_time_text = base_time.strftime("%Y-%m-%d %H:%M")
-            bbox = font.getbbox(base_time_text)
-            tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
-            x_text = (single_w - tw) / 2   # 왼쪽 칸 내 중앙
-            y_text = single_h + (50 - th) / 2
-            draw.text((x_text, y_text), base_time_text, fill="black", font=font)
-            
-            # 예시: 현재 예측 디렉터리 이름을 전체 캔버스 하단 중앙에 표시
-            pred_source = pd.name
-            bbox_src = font.getbbox(pred_source)
-            sw, sh = bbox_src[2]-bbox_src[0], bbox_src[3]-bbox_src[1]
-            x_src = (composite_w - sw) / 2
-            y_src = single_h + (50 - sh) / 2
-            draw.text((x_src, y_src), pred_source, fill="black", font=font)
-            
-            # 9. composite frame을 numpy 배열로 변환하여 프레임 리스트에 추가
-            frame_array = np.array(composite)
-            frames.append(frame_array)
-        
-        # 10. 기준시간 갱신: 현재 기준시간에서 150분 뒤의 시간으로 설정
-        new_base_time = base_time + timedelta(minutes=150)
-        # 만약 새 기준시간이 전체 타겟 범위를 벗어나면 종료
-        if new_base_time > sorted_target_times[-1]:
-            print(f"새 기준시간 {new_base_time}가 타겟 이미지 범위를 벗어납니다. 종료합니다.")
-            break
-        # 타겟 이미지가 없으면 건너뛰고 다음 기준시간으로 진행
-        if new_base_time not in target_dict:
-            print(f"새 기준시간 {new_base_time}에 해당하는 타겟 이미지가 없어 건너뜁니다.")
-            base_time = new_base_time
-            continue
-        base_time = new_base_time
-
-    if not frames:
-        print("생성된 프레임이 없습니다.")
-        return
+    cell_w, cell_h = 512, 512       # 각 셀의 이미지 크기
+    base_text_margin = 30           # 기존 텍스트 영역 높이
+    extra_time_offset = 30          # 텍스트를 추가로 아래로 이동할 픽셀
+    new_text_margin = base_text_margin + extra_time_offset  # 새 텍스트 영역 높이 (60)
+    header_margin = 30              # 예측 이미지 헤더 텍스트 영역 높이 (상단)
     
-    # 11. 프레임 리스트를 MP4 동영상으로 저장 (fps=1)
-    try:
-        imageio.mimsave(str(output_mp4), frames, fps=1, codec='libx264')
-        print(f"MP4 동영상이 {output_mp4}로 저장되었습니다.")
-    except Exception as e:
-        print(f"MP4 저장 에러: {e}")
+    # composite 전체 크기 계산:
+    # width = 3 * cell_w
+    # height = header_margin + (상단 행: cell_h + new_text_margin) + (하단 행: cell_h + new_text_margin)
+    comp_width = 3 * cell_w
+    comp_height = header_margin + (cell_h + new_text_margin) + (cell_h + new_text_margin)
+    
+    for i in range(len(sorted_target_times) - 2):
+        # 슬라이딩 윈도우에서 target 시간 3개 선택
+        t0 = sorted_target_times[i]
+        t1 = sorted_target_times[i+1]
+        t2 = sorted_target_times[i+2]
+        
+        # 각 컬럼에 대해 예측 이미지 존재 확인
+        if (t0 not in pred_dicts[pred_dirs[0]] or
+            t1 not in pred_dicts[pred_dirs[1]] or
+            t2 not in pred_dicts[pred_dirs[2]]):
+            print(f"Skipping window starting at {t0.strftime('%Y-%m-%d %H:%M')} because one or more predicted images are missing.")
+            continue
+        
+        try:
+            # target 이미지 로드 (하단 행)
+            target_img0 = Image.open(target_dict[t0]).convert("RGB")
+            target_img1 = Image.open(target_dict[t1]).convert("RGB")
+            target_img2 = Image.open(target_dict[t2]).convert("RGB")
+            # 예측 이미지 로드 (상단 행)
+            pred_img0 = Image.open(pred_dicts[pred_dirs[0]][t0]).convert("RGB")
+            pred_img1 = Image.open(pred_dicts[pred_dirs[1]][t1]).convert("RGB")
+            pred_img2 = Image.open(pred_dicts[pred_dirs[2]][t2]).convert("RGB")
+        except Exception as e:
+            print(f"Error loading images for window starting at {t0.strftime('%Y-%m-%d %H:%M')}: {e}")
+            continue
+        
+        # 5. composite 캔버스 생성 및 드로잉 객체 생성
+        composite = Image.new("RGB", (comp_width, comp_height), (255, 255, 255))
+        draw = ImageDraw.Draw(composite)
+        
+        # 폰트 로드 (옵션)
+        if font_path and Path(font_path).exists():
+            font = ImageFont.truetype(str(font_path), 20)
+        else:
+            font = ImageFont.load_default()
+        
+        # ───────────────────────────────
+        # (A) 헤더 텍스트 추가 (예측 이미지 위, header 영역)
+        def draw_header_text(cell_idx, text):
+            bbox = font.getbbox(text)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            x = cell_idx * cell_w + (cell_w - text_w) // 2
+            y = (header_margin - text_h) // 2  # header 영역 중앙 배치
+            draw.text((x, y), text, fill="black", font=font)
+        
+        draw_header_text(0, "After 30 minutes")
+        draw_header_text(1, "After 60 minutes")
+        draw_header_text(2, "After 90 minutes")
+        # ───────────────────────────────
+        
+        # ───────────────────────────────
+        # (B) 이미지 배치
+        # 상단 행 (예측 이미지): header_margin부터 시작
+        composite.paste(pred_img0, (0, header_margin))
+        composite.paste(pred_img1, (cell_w, header_margin))
+        composite.paste(pred_img2, (2 * cell_w, header_margin))
+        
+        # 하단 행 (target 이미지): 상단 행 영역 다음에 배치
+        bottom_row_y = header_margin + cell_h + new_text_margin
+        composite.paste(target_img0, (0, bottom_row_y))
+        composite.paste(target_img1, (cell_w, bottom_row_y))
+        composite.paste(target_img2, (2 * cell_w, bottom_row_y))
+        # ───────────────────────────────
+        
+        # ───────────────────────────────
+        # (C) 시간 텍스트 추가 (각 셀 하단, 기존 위치보다 30픽셀 아래에)
+        def draw_text(cell_idx, text, row):
+            bbox = font.getbbox(text)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            x = cell_idx * cell_w + (cell_w - text_w) // 2
+            if row == 0:
+                # 상단 행 (예측 이미지)의 경우:
+                # 이미지는 header_margin ~ header_margin+cell_h 이며, 기존 텍스트 위치: header_margin + cell_h - text_h
+                base_y = header_margin + cell_h
+            else:
+                # 하단 행 (target 이미지)의 경우:
+                # 이미지는 bottom_row_y ~ bottom_row_y+cell_h 이며, 기존 텍스트 위치: bottom_row_y + cell_h - text_h
+                base_y = bottom_row_y + cell_h
+            y = base_y - text_h + extra_time_offset  # 기존 위치보다 30픽셀 아래로
+            draw.text((x, y), text, fill="black", font=font)
+        
+        # 상단(예측) 행의 시간 텍스트
+        draw_text(0, t0.strftime("%Y-%m-%d %H:%M"), 0)
+        draw_text(1, t1.strftime("%Y-%m-%d %H:%M"), 0)
+        draw_text(2, t2.strftime("%Y-%m-%d %H:%M"), 0)
+        # 하단(target) 행의 시간 텍스트
+        draw_text(0, t0.strftime("%Y-%m-%d %H:%M"), 1)
+        draw_text(1, t1.strftime("%Y-%m-%d %H:%M"), 1)
+        draw_text(2, t2.strftime("%Y-%m-%d %H:%M"), 1)
+        # ───────────────────────────────
+        
+        frames.append(np.array(composite))
+    
+    if not frames:
+        print("No composite frames generated.")
+        return
+    from fractions import Fraction
 
+
+    # 7. MP4 동영상으로 저장 (fps=1, 1초마다 프레임 전환)
+    try:
+        fps = Fraction(4, 3)  # 4/3 ≈ 1.33
+        imageio.mimsave(str(output_mp4), frames, fps=fps, codec='libx264')
+        print(f"MP4 video saved as {output_mp4}")
+    except Exception as e:
+        print(f"Error saving MP4: {e}")
+
+# =============================================================================
+# 사용 예시:
+# =============================================================================
+# pred_dirs = ["rs_pred_0_base", "rs_pred_1", "rs_pred_2"]
+# target_dir = "rs_target_0"
+# output_mp4 = "result.mp4"
+# font_path = "arial.ttf"  (옵션)
 
