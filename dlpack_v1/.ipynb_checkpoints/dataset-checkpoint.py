@@ -1,4 +1,5 @@
-
+import pandas as pd
+import numpy as np
 class ImageDataset:
     def __init__(self, csv_path="./train.csv"):
         self.df = pd.read_csv(csv_path)
