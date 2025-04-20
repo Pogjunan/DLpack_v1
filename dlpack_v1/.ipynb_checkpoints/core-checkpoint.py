@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont
 from dlpack_v1.dataset import ImageDataset
+
 ##function ##
 
 def truncate(value, max_length=200):

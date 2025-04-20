@@ -19,7 +19,6 @@ from dlpack_v1.core import LU3
 from dlpack_v1.core import LbSolver
 from dlpack_v1.core import LbSolver1
 from dlpack_v1.core import LbSolver2
-from dlpack_v1.core import LbSolver3
 
 
 from dlpack_v1.core import UbSolver
