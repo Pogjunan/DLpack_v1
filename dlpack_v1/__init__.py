@@ -8,6 +8,14 @@ from dlpack_v1.core import image_animation_7day1
 from dlpack_v1.core import image_animation_7day2
 from dlpack_v1.core import animation_image_newcode_mp4
 from dlpack_v1.core import animation_image_newcode_mp4_new
+
+
+from dlpack_v1.core import LU
+from dlpack_v1.core import LbSolver
+from dlpack_v1.core import UbSolver
+
+
+
 def __dir__():
     keys = dict.fromkeys((globals().keys()))
     keys.pop("core")

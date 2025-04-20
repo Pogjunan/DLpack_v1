@@ -964,3 +964,99 @@ def animation_image_newcode_mp4_new(pred_dirs, target_dir, output_mp4, font_path
 # output_mp4 = "result.mp4"
 # font_path = "arial.ttf"  (옵션)
 
+
+
+import numpy as np
+
+def LU(A):
+    n, _ = A.shape
+    L = np.identity(n)
+    U = A.astype(float)
+    
+    print("초기 L:\n", L)
+    print("초기 U:\n", U)
+    
+    for r in range(n-1):
+        print(f"\n--------- r = {r} ---------")
+        
+        # L[r:,r] 업데이트
+        L[r+1:,r] = U[r+1:,r] / U[r,r]
+        print(f"L[r+1:,r] = U[r+1:,r] / U[r,r]")
+        print(f"L[{r+1}:,{r}] = U[{r+1}:,{r}] / U[{r},{r}] = {U[r+1:,r]} / {U[r,r]}")
+        print("업데이트된 L:\n", L)
+        
+        # U 업데이트
+        for i in range(r+1,n):
+            print(f"\ni = {i}일 때")
+            print(f"U[{i},{r}:] = U[{i},{r}:] - (U[{i},{r}]/U[{r},{r}])*U[{r},{r}:]")
+            print(f"U[{i},{r}:] = {U[i,r:]} - ({U[i,r]}/{U[r,r]})*{U[r,r:]}")
+            
+            multiplier = U[i,r]/U[r,r]
+            print(f"곱셈 계수: {multiplier}")
+            
+            U[i,r:] = U[i,r:] - multiplier * U[r,r:]
+            print(f"업데이트된 U[{i},{r}:] = {U[i,r:]}")
+        
+        print("\n현재 U:\n", U)
+    
+    print("\n최종 L:\n", L)
+    print("최종 U:\n", U)
+    return L, U
+
+
+def LbSolver(L, b):
+    print("\n===== LbSolver 실행 =====")
+    print("입력 L 행렬:\n", L)
+    print("입력 b 벡터:", b)
+    
+    n = len(L)
+    y = np.zeros(n)
+    
+    print("\n첫 번째 방정식 계산:")
+    print(f"y[0] = b[0] = {b[0]}")
+    y[0] = b[0]
+    print(f"y = {y}")
+    
+    for i in range(1, n):
+        print(f"\n{i+1}번째 방정식 계산:")
+        print(f"L[{i},:i] = {L[i,:i]}")
+        print(f"y[:i] = {y[:i]}")
+        dot_product = L[i,:i] @ y[:i]
+        print(f"L[{i},:i] @ y[:i] = {dot_product}")
+        
+        y[i] = b[i] - dot_product
+        print(f"y[{i}] = b[{i}] - dot_product = {b[i]} - {dot_product} = {y[i]}")
+        print(f"현재 y = {y}")
+    
+    print("\n===== LbSolver 결과 =====")
+    print("최종 y =", y)
+    return y
+
+def UbSolver(U, b):
+    print("\n===== UbSolver 실행 =====")
+    print("입력 U 행렬:\n", U)
+    print("입력 b 벡터:", b)
+    
+    n = len(U)
+    x = np.zeros(n)
+    
+    print("\n마지막 방정식부터 계산 시작:")
+    print(f"x[{n-1}] = b[{n-1}] / U[{n-1},{n-1}] = {b[n-1]} / {U[n-1,n-1]} = {b[n-1]/U[n-1,n-1]}")
+    x[n-1] = b[n-1] / U[n-1, n-1]
+    print(f"x = {x}")
+    
+    for i in range(n-2, -1, -1):
+        print(f"\n{i+1}번째 방정식 계산 (역순):")
+        print(f"U[{i},i+1:] = {U[i,i+1:]}")
+        print(f"x[i+1:] = {x[i+1:]}")
+        
+        dot_product = np.dot(U[i, i+1:], x[i+1:])
+        print(f"U[{i},i+1:] @ x[i+1:] = {dot_product}")
+        
+        x[i] = (b[i] - dot_product) / U[i, i]
+        print(f"x[{i}] = (b[{i}] - dot_product) / U[{i},{i}] = ({b[i]} - {dot_product}) / {U[i,i]} = {x[i]}")
+        print(f"현재 x = {x}")
+    
+    print("\n===== UbSolver 결과 =====")
+    print("최종 x =", x)
+    return x
