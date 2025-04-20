@@ -1003,7 +1003,31 @@ def LU(A):
     print("최종 U:\n", U)
     return L, U
 
+def LU1(A):
+    print("    n, _ = A.shape")
+    print(" L = np.identity(n))")
+    print(" U = A.astype(float)")
 
+def LU2(A):
+    print("for r in range(n-1):")
+    print("    L[r+1:,r] = U[r+1:,r] / U[r,r]")
+
+def LU3(A):
+    print("for i in range(r+1,n):")
+    print("U[i,r:] = U[i,r:] -  U[i,r]/U[r,r] *U[r,r:]") 
+
+
+def LbSolver1(L,b):
+    print("    n = len(L)")
+    print(" y = np.zeros(n)")
+    print("y[0] = b[0]")
+
+def LbSolver2(L,b):
+    print("        for i in range(1,n):")
+    print(" y[i] = b[i] - L[i,:i] @ y[:i]")
+    print("    return y")
+
+    
 def LbSolver(L, b):
     print("\n===== LbSolver 실행 =====")
     print("입력 L 행렬:\n", L)
@@ -1032,6 +1056,20 @@ def LbSolver(L, b):
     print("최종 y =", y)
     return y
 
+
+
+def UbSolver1(U,b):
+    
+    
+    print("    n = len(U)")
+    print(" x = np.zeros(n)")
+
+def UbSolver2(U,b):
+    print("x[n-1] = b[n-1] / U[n-1, n-1]")
+    print("for i in range(n-2, -1, -1):")
+    print("x[i] = (b[i] - np.dot(U[i, i+1:], x[i+1:])) / U[i, i]")
+        
+    
 def UbSolver(U, b):
     print("\n===== UbSolver 실행 =====")
     print("입력 U 행렬:\n", U)
