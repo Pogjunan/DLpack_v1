@@ -17,7 +17,7 @@ pip install --upgrade --force-reinstall git+https://github.com/Pogjunan/dlpack_v
 
 사용용도는 편리와 getitem 위주를 기준으로하며
 
-전처리와 전처리를 위한 도구들로 구성을 계획중에있다.
+전처리와 전처리를 위한 도구들로 구성을 계획 중
 
 
 
